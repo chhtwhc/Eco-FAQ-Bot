@@ -15,6 +15,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
+from langchain_huggingface import HuggingFaceEmbeddings  # 建議使用新版 package
 
 # PDF 讀取與文字切分工具
 from langchain_community.document_loaders import PyPDFLoader
@@ -100,80 +101,48 @@ def start_shutdown_monitor():
 if ENABLE_AUTO_SHUTDOWN:
     start_shutdown_monitor()
 
-
 # ==========================================
-# 3. 建立 RAG 大腦（快取資源，只執行一次）
-#    Cloud 部署建議：避免在 cache_resource 內做進度條 UI 副作用
+# 3. 建立 RAG 大腦（改為：從 GitHub 檔案載入預建索引）
 # ==========================================
 @st.cache_resource
 def init_rag_system(api_key: str):
-    all_documents = []
-
-    # Part A. 讀取 FAQ.json
-    json_path = get_resource_path("FAQ.json")
-    if os.path.exists(json_path):
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        for item in data:
-            text_content = (
-                f"[FAQ]\n"
-                f"Q: {item.get('常見問題', '')}\n"
-                f"A: {item.get('問題答覆', '')}\n"
-                f"Scope: {item.get('適用對象', '')}\n"
-            )
-            all_documents.append(Document(page_content=text_content, metadata={"source": "FAQ.json"}))
-    else:
-        # Cloud 上若找不到，通常是 repo 結構或檔名大小寫
-        raise FileNotFoundError("找不到 FAQ.json（請確認 FAQ.json 已在 repo 根目錄）")
-
-    # Part B. 讀取 PDF
-    pdf_folder = get_resource_path("pdfs")
-    if os.path.exists(pdf_folder):
-        pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith(".pdf")]
-        pdf_raw_docs = []
-
-        for pdf_file in pdf_files:
-            file_path = os.path.join(pdf_folder, pdf_file)
-            try:
-                loader = PyPDFLoader(file_path)
-                pdf_raw_docs.extend(loader.load())
-            except Exception as e:
-                # 不因單一 PDF 失敗而中斷
-                print(f"❌ 讀取失敗 {pdf_file}: {e}")
-
-        if pdf_raw_docs:
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-            pdf_chunks = text_splitter.split_documents(pdf_raw_docs)
-            all_documents.extend(pdf_chunks)
-    else:
-        # 允許沒有 pdfs/，但會只剩 FAQ
-        print("ℹ️ 提示：找不到 pdfs 資料夾（若不需要 PDF 可忽略）")
-
-    if not all_documents:
-        raise ValueError("❌ 錯誤：沒有讀取到任何資料！")
-
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        google_api_key=api_key
+    # A. 初始化與 build_index.py 相同的 Embedding 模型
+    # 注意：此步驟在 Streamlit Cloud 執行不消耗 Google API 額度
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
 
-    # 建立向量資料庫
-    vector_db = FAISS.from_documents(all_documents, embeddings)
+    # B. 指定預建索引的資料夾路徑
+    index_path = get_resource_path("faiss_index")
 
+    if not os.path.exists(index_path):
+        st.error(f"❌ 找不到預建索引資料夾：{index_path}。請確認已將 faiss_index 推送至 GitHub。")
+        st.stop()
+
+    # C. 直接載入索引（秒開，不需重新計算）
+    try:
+        vector_db = FAISS.load_local(
+            index_path, 
+            embeddings, 
+            allow_dangerous_deserialization=True  # 載入本地 pkl 檔案需開啟此項
+        )
+    except Exception as e:
+        st.error(f"❌ 載入索引失敗：{e}")
+        st.stop()
+
+    # D. 設定檢索器與 LLM
     retriever = vector_db.as_retriever(search_kwargs={"k": 5})
     llm = ChatGoogleGenerativeAI(model="models/gemini-2.5-flash", google_api_key=api_key)
 
     return retriever, llm
 
-
-# 初始化系統（用 spinner 顯示即可，避免 cache_resource 內 UI）
+# 修改初始化顯示文字
 try:
-    with st.spinner("正在載入知識庫並建立索引（FAQ + PDF）..."):
+    with st.spinner("正在快速載入生態知識庫索引..."):
         retriever, llm = init_rag_system(GOOGLE_API_KEY)
-    st.success("✅ 生態知識庫 (FAQ + PDF) 已載入！系統就緒。")
+    st.success("✅ 知識庫已載入！系統已就緒。")
 except Exception as e:
-    st.error(f"❌ 系統初始化失敗。錯誤訊息：{e}")
+    st.error(f"❌ 系統啟動失敗：{e}")
     st.stop()
 
 

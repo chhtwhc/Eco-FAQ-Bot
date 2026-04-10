@@ -7,3 +7,5 @@ langchain-google-genai
 google-generativeai
 faiss-cpu
 pypdf
+langchain-huggingface
+sentence-transformers
