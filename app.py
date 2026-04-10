@@ -136,7 +136,7 @@ def init_rag_system(api_key: str):
 
     return retriever, llm
 
-# 修改初始化顯示文字
+# 初始化系統
 try:
     with st.spinner("正在快速載入生態知識庫索引..."):
         retriever, llm = init_rag_system(GOOGLE_API_KEY)
@@ -200,7 +200,7 @@ if user_input := st.chat_input("請輸入生態檢核相關的問題..."):
             # ✅ 只檢索一次
             source_documents = retriever.invoke(user_input)
 
-            # 顯示檢索結果（可保留/可關閉）
+            # 顯示檢索結果
             with st.expander("🔍 查看檢索到的原始資料"):
                 for idx, doc in enumerate(source_documents):
                     source_name = doc.metadata.get("source", "未知來源")
@@ -210,10 +210,16 @@ if user_input := st.chat_input("請輸入生態檢核相關的問題..."):
                     st.divider()
 
             context_text = format_docs(source_documents)
-            response = answer_chain.invoke({"context": context_text, "question": user_input})
+            
+            # --- 方案A 修改處：改用串流輸出 ---
+            message_placeholder.empty() # 清除檢索中的文字
+            
+            # 使用 st.write_stream 處理 answer_chain.stream
+            full_response = st.write_stream(
+                answer_chain.stream({"context": context_text, "question": user_input})
+            )
 
-            message_placeholder.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
 
         except Exception as e:
             message_placeholder.error(f"發生錯誤：{e}")
