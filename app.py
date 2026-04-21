@@ -31,7 +31,7 @@ from streamlit.runtime import get_instance
 def get_resource_path(relative_path: str) -> str:
     """取得資源檔案的絕對路徑（支援 exe 與 Streamlit Cloud）"""
     if hasattr(sys, "_MEIPASS"):  # PyInstaller 打包情境
-        return os.path.join(sys._MEIPASS, relative_path)
+        return os.path.join(sys._MEIPASS, relative_path) # type: ignore
     base_dir = Path(__file__).resolve().parent
     return str(base_dir / relative_path)
 
@@ -155,16 +155,14 @@ def format_docs(docs):
 
 template = """
 你是一位政府水利單位的專業生態檢核顧問。以下是從內部資料彙整的【背景資訊】。
-這些資訊可能來自 FAQ 問答集，也可能來自 PDF 規範文件。
-以 FAQ 問答集的內容做為優先資料來源。
+這些資訊包含結構化的 FAQ 問答集以及 PDF 規範文件。
 
-請依據這些資訊來回答使用者的問題。
-
-### 回答守則：
-1. **基於事實**：請優先依據【背景資訊】的內容進行回答。
-2. **整合資訊**：如果答案分散在不同段落，請將其整合成通順的說明。
-3. **自然專業**：以專業顧問的口吻說明，不需要提到「資料庫」或「文件切片」等字眼。
-4. **資訊不足**：如果【背景資訊】與問題無關，請直接回答：「抱歉，目前的資料中暫無此問題的詳細說明，建議查閱原始計畫書件。」
+### 核心回覆守則：
+1. **FAQ 絕對優先**：如果【背景資訊】中包含來自 'FAQ.json' 的內容，請務必「優先」以此作為回答基準。
+2. **補充參考**：只有在 FAQ 中找不到答案，或 FAQ 資訊不足時，才參考 PDF 規範文件的內容。
+3. **衝突處理**：若兩者資訊發生衝突，請嚴格以 FAQ.json 的說明為準。
+4. **整合呈現**：以自然、專業的口吻整合成通順的說明，不需提到「資料庫」或「文件切片」等字眼。
+5. **資訊不足**：若【背景資訊】與問題完全無關，請直接回答：「抱歉，目前的資料中暫無此問題的詳細說明，建議查閱原始計畫書件。」
 
 ### 背景資訊：
 {context}
@@ -172,6 +170,7 @@ template = """
 ### 使用者問題：
 {question}
 """
+
 prompt = PromptTemplate.from_template(template)
 answer_chain = prompt | llm | StrOutputParser()
 
